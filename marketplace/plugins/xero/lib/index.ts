@@ -29,11 +29,19 @@ export default class Xero implements QueryService {
 
     const scope = `openid profile email offline_access accounting.transactions accounting.transactions.read accounting.reports.read accounting.reports.tenninetynine.read accounting.journals.read accounting.settings accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.budgets.read finance.statements.read finance.accountingactivity.read finance.cashvalidation.read finance.bankstatementsplus.read`;
 
-
     if (!clientId || !clientSecret) {
-      throw new QueryError('Missing OAuth credentials','Xero OAuth "clientId" or "clientSecret" not provided',{ clientIdProvided: !!clientId, clientSecretProvided: !!clientSecret });
+      const errorMessage = 'Missing OAuth credentials: "clientId" or "clientSecret" not provided.';
+      const errorDetails = {
+        message: errorMessage,
+        name: 'InvalidConfigurationError',
+        code: 'MISSING_OAUTH_CREDENTIALS',
+        missing: {
+          clientId: !clientId,
+          clientSecret: !clientSecret,
+        },
+      };
+      throw new QueryError('Invalid configuration', errorMessage, errorDetails);
     }
-
 
     const encodedScope = encodeURIComponent(scope);
     const baseUrl = `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${clientId}` +
@@ -44,8 +52,16 @@ export default class Xero implements QueryService {
 
   private convertQueryOptions(queryOptions: any, customHeaders?: Record<string, string>): any {
     if (!queryOptions || typeof queryOptions !== 'object') {
-      throw new QueryError('Invalid query options', 'Expected queryOptions to be an object', {queryOptions});
-     }
+      const errorMessage = 'Expected queryOptions to be an object';
+      const errorDetails = {
+        message: errorMessage,
+        name: 'InvalidQueryOptionsError',
+        code: 'INVALID_QUERY_OPTIONS',
+        received: queryOptions,
+        expected: 'object',
+      };
+      throw new QueryError('Invalid configuration', errorMessage, errorDetails);
+    }
 
     const { operation, params = {} } = queryOptions;
     const method = typeof operation === 'string' ? operation.toLowerCase() : 'get';
@@ -98,7 +114,16 @@ export default class Xero implements QueryService {
   async refreshToken(sourceOptions: any) {
     const refresh_token = sourceOptions['refresh_token'];
     if (!refresh_token) {
-      throw new QueryError('Query could not be completed', 'Unauthorized', {});
+      const errorMessage = 'Missing OAuth refresh_token in source options';
+      const errorDetails = {
+        message: errorMessage,
+        name: 'UnauthorizedError',
+        code: 'MISSING_REFRESH_TOKEN',
+        missing: {
+          refresh_token: true,
+        },
+      };
+      throw new QueryError('Query could not be completed', errorMessage, errorDetails);
     }
 
     const data = new URLSearchParams({
@@ -123,10 +148,34 @@ export default class Xero implements QueryService {
           refresh_token: result.refresh_token,
         };
       } else {
-        throw new QueryError('Failed to get access token from Xero', 'access_token not found in response', {response: result});
+        const errorMessage = 'Access token not found in Xero response';
+        const errorDetails = {
+          response: result,
+          status: response.statusCode,
+        };
+        throw new QueryError('XeroTokenError', errorMessage, errorDetails);
       }
-    } catch (error: any) {
-      throw new QueryError('Token refresh failed', error?.message || 'Unknown error', {errorDetails: error?.response?.body || error});
+    } catch(error: any) {
+      let parsed: any;
+
+      try {
+        parsed = error?.response?.body ? JSON.parse(error.response.body) : error;
+      } catch {
+        parsed = error?.response?.body || error;
+      }
+
+      const errorMessage =
+        parsed?.Title ||
+        parsed?.error_description ||
+        parsed?.error ||
+        error?.message ||
+        'Xero token refresh failed';
+
+      const errorDetails = {
+        status: error?.response?.statusCode || null,
+        response: parsed,
+      };
+      throw new QueryError('XeroTokenRefreshError', errorMessage, errorDetails);
     }
   }
 
@@ -171,9 +220,20 @@ export default class Xero implements QueryService {
         ['refresh_token', tokenResponse.refresh_token],
       ];
     } catch (error: any) {
-      const errorMessage = error?.message || 'unknown error';
-      const errorDetails = error?.response?.body || error
-      throw new QueryError('Failed to retrieve access tokens', errorMessage,errorDetails);
+      let parsed;
+      try {
+        parsed = error?.response?.body ? JSON.parse(error.response.body) : error;
+      } catch {
+        parsed = error?.response?.body || error;
+      }
+      const errorMessage = parsed?.error_description || parsed?.error || error?.message || 'Failed to exchange token with Xero';
+      const errorDetails = {
+        message: errorMessage,
+        name: 'XeroTokenExchangeError',
+        code: parsed?.code || 'XERO_TOKEN_EXCHANGE_FAILED',
+        received: parsed,
+      };
+      throw new QueryError('Failed to retrieve access tokens', errorMessage, errorDetails);
     }
   }
 
@@ -241,22 +301,45 @@ export default class Xero implements QueryService {
     }
       try {
         const response = await got(url, requestOptions);
-      if (response.statusCode !== 200) {
-        const errorMessage = `Xero returned ${response.statusCode}`;
-        const errorDetails = {
-          statusCode: response?.statusCode,
-          responseBody: response?.body
+        if (response.statusCode !== 200) {
+          const errorMessage = `Xero request failed with status ${response.statusCode}`;
+
+          let xeroError = null;
+          try {
+            xeroError = JSON.parse(response.body);
+          } catch {
+            xeroError = null;
+          }
+          const errorDetails: any = {
+            statusCode: response.statusCode,
+            responseBody: response.body,
+            xeroError,
+          };
+          throw new QueryError('Xero API Error', errorMessage, errorDetails);
         }
-        throw new QueryError('Unexpected status code',errorMessage,errorDetails);
-      }
+
       const result = response.body ? JSON.parse(response.body) : 'Query Success';
       return {
         status: 'ok',
         data: result,
       };
     } catch (error: any) {
-      const errorMessage = JSON.parse(error?.response?.body?.data || '{}')?.Message || error?.message || 'Unknown error';
-      const errorDetails = error?.response?.body || error;
+      let parsed;
+      try {
+        parsed = error?.response?.body ? JSON.parse(error.response.body) : error;
+      } catch {
+        parsed = error?.response?.body || error;
+      }
+      const errorMessage =
+        parsed?.Title ||
+        parsed?.error_description ||
+        parsed?.error ||
+        'Xero API request failed';
+
+      const errorDetails = {
+        statusCode: error?.response?.statusCode,
+        response: parsed,
+      };
       throw new QueryError('Query execution failed', errorMessage, errorDetails);
     }
   }
