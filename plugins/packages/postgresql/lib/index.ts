@@ -48,7 +48,7 @@ export default class PostgresqlQueryService implements QueryService {
         sourceOptions['connection_string'] = modifiedConnectionString.toString();
       }
     }
-
+    const include_metadata = sourceOptions['include_metadata'];
     try {
       // If dynamic connection parameters is toggled on - We don't cache the connection also destroy the connection created.
       checkCache = sourceOptions['allow_dynamic_connection_parameters'] ? false : true;
@@ -57,13 +57,19 @@ export default class PostgresqlQueryService implements QueryService {
       switch (queryOptions.mode) {
         case 'sql': {
           if (this.isSqlParametersUsed(queryOptions)) {
-            return await this.handleRawQuery(knexInstance, queryOptions);
+            return await this.handleRawQuery(knexInstance, queryOptions,include_metadata);
           } else {
             pgPool = knexInstance.client.pool;
             pgConnection = await pgPool.acquire().promise;
             const query = queryOptions.query;
             let result = { rows: [] };
             result = await pgConnection.query(query);
+            if(include_metadata){
+              return{
+                status: 'ok',
+                data: result,
+              }
+            }
             return {
               status: 'ok',
               data: result.rows,
@@ -71,7 +77,7 @@ export default class PostgresqlQueryService implements QueryService {
           }
         }
         case 'gui': {
-          return await this.handleGuiQuery(knexInstance, queryOptions);
+          return await this.handleGuiQuery(knexInstance, queryOptions,include_metadata);
         }
         default:
           throw new Error("Invalid query mode. Must be either 'sql' or 'gui'.");
@@ -100,13 +106,13 @@ export default class PostgresqlQueryService implements QueryService {
     return { status: 'ok' };
   }
 
-  private async handleGuiQuery(knexInstance: Knex, queryOptions: QueryOptions): Promise<any> {
+  private async handleGuiQuery(knexInstance: Knex, queryOptions: QueryOptions,include_metadata:boolean): Promise<any> {
     if (queryOptions.operation !== 'bulk_update_pkey') {
       return { rows: [] };
     }
 
     const query = this.buildBulkUpdateQuery(queryOptions);
-    return await this.executeQuery(knexInstance, query);
+    return await this.executeQuery(knexInstance, query,{},include_metadata);
   }
 
   private isSqlParametersUsed(queryOptions: QueryOptions): boolean {
@@ -116,19 +122,23 @@ export default class PostgresqlQueryService implements QueryService {
     return !!sanitizedQueryParams.length;
   }
 
-  private async handleRawQuery(knexInstance: Knex, queryOptions: QueryOptions): Promise<QueryResult> {
+  private async handleRawQuery(knexInstance: Knex, queryOptions: QueryOptions,include_metadata:boolean): Promise<QueryResult> {
     const { query, query_params } = queryOptions;
     const queryParams = query_params || [];
     const sanitizedQueryParams: Record<string, any> = Object.fromEntries(queryParams.filter(([key]) => !isEmpty(key)));
-    const result = await this.executeQuery(knexInstance, query, sanitizedQueryParams);
+    const result = await this.executeQuery(knexInstance, query, sanitizedQueryParams,include_metadata);
 
     return { status: 'ok', data: result };
   }
 
-  private async executeQuery(knexInstance: Knex, query: string, sanitizedQueryParams: Record<string, any> = {}) {
+  private async executeQuery(knexInstance: Knex, query: string, sanitizedQueryParams: Record<string, any> = {},include_metadata: boolean) {
     if (isEmpty(query)) throw new Error('Query is empty');
-    const { rows } = await knexInstance.raw(query, sanitizedQueryParams);
-    return rows;
+    // const { rows } = await knexInstance.raw(query, sanitizedQueryParams);
+    // return rows;
+    const result = await knexInstance.raw(query, sanitizedQueryParams);
+    if(include_metadata) return result;
+    return result.rows;
+
   }
 
   private connectionOptions(sourceOptions: SourceOptions) {

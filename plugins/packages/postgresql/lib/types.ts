@@ -14,6 +14,7 @@ export type SourceOptions = {
   connection_string: string;
   connection_options: string[][];
   allow_dynamic_connection_parameters: boolean;
+  include_metadata: boolean;
 };
 export type QueryOptions = {
   operation: string;

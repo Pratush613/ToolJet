@@ -94,6 +94,12 @@
       "title": "Allow dynamic connection parameters",
       "description": "Turning this on will allow dynamically setting host name and database from application",
       "default": false
+    },
+    "include_metadata": {
+      "type": "boolean",
+      "title": "Allow including Metadata",
+      "description": "Allow including Metadata",
+      "default": false
     }
   },
   "tj:encrypted": [
@@ -196,6 +202,13 @@
           "key": "allow_dynamic_connection_parameters",
           "label": "Allow dynamic connection parameters",
           "description": "Turning this on will allow dynamically setting host name and database from application",
+          "widget": "toggle"
+        },
+        "include_metadata": {
+          "$ref": "#/properties/include_metadata",
+          "key": "include_metadata",
+          "label": "Allow including Metadata",
+          "description": "Turning this on will include Metadata",
           "widget": "toggle"
         }
       }
